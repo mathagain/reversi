@@ -334,8 +334,7 @@ button { font-family: inherit; }
         <div class="card">
           <div class="mode-toggle" id="prac-mode" role="group" aria-label="연습 종류">
             <button class="pill" type="button" data-mode="A" aria-pressed="true">A. 놓을 수 있는 칸 찾기</button>
-            <button class="pill" type="button" data-mode="E" aria-pressed="false">B. 많이 뒤집기 (쉬움)</button>
-            <button class="pill" type="button" data-mode="H" aria-pressed="false">B. 좋은 자리 고르기 (어려움)</button>
+            <button class="pill" type="button" data-mode="E" aria-pressed="false">B. 가장 많이 뒤집기</button>
           </div>
           <div class="field" style="margin-top:18px">
             <div class="field-label">문제 고르기</div>
@@ -950,27 +949,24 @@ $('#learn-next').addEventListener('click', () => { if (L.step < 4) learnLoad(L.s
 const PM = {
   A: { list: PUZ.A, label: 'A',
     guide: '초록 칩이 놓을 수 있는 칸을 <b>모두</b> 찾아 눌러요. 다시 누르면 취소돼요!' },
-  E: { list: PUZ.Beasy, label: 'B 쉬움',
-    guide: '칸 안의 <b>숫자</b>는 뒤집히는 칩의 개수예요. 숫자가 <b>가장 큰 칸</b>을 찾아요!' },
-  H: { list: PUZ.Bhard, label: 'B 어려움',
-    guide: '<b>★ 모서리</b>는 최고의 자리, <b>! 칸</b>은 모서리를 내줄 수 있는 위험한 자리예요. 가장 좋은 칸을 골라요.' }
+  E: { list: PUZ.Beasy, label: 'B',
+    guide: '노란 점선 칸 중에서 칩을 <b>가장 많이 뒤집는 칸</b>을 찾아요. 칸마다 몇 개가 갇히는지 직접 세어 봐요!' }
 };
-const P = { mode: 'A', i: 0, b: null, sel: new Set(), solved: false, tries: 0, done: { A: [], E: [], H: [] } };
+const P = { mode: 'A', i: 0, b: null, sel: new Set(), solved: false, tries: 0, token: 0, done: { A: [], E: [] } };
 let pb;
 const pPills = buildPills($('#prac-steps'), 4, (i) => pracLoad(P.mode, i));
 
 function legendFor(mode) {
   let h = '<li><span class="sw sw-legal"></span>놓을 수 있는 칸</li><li><span class="sw sw-sel"></span>내가 고른 칸</li>';
-  if (mode === 'H') h += '<li><span class="sw sw-corner">★</span>모서리 칸</li><li><span class="sw sw-danger"></span>위험한 칸(모서리 옆)</li>';
   $('#prac-legend').innerHTML = h;
 }
 function pracLoad(mode, i) {
-  P.mode = mode; P.i = i; P.sel = new Set(); P.solved = false; P.tries = 0;
+  P.token++; P.mode = mode; P.i = i; P.sel = new Set(); P.solved = false; P.tries = 0;
   const pz = PM[mode].list[i];
   P.b = parse(pz.rows);
   pb.setChips(P.b, [], null, true);
   pb.last(null); pb.clear(); pb.clickable(true);
-  pb.setDeco(mode === 'H', mode === 'H');
+  pb.setDeco(false, false);
   $$('#prac-mode .pill').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.mode === mode)));
   $('#prac-guide').innerHTML = PM[mode].guide;
   legendFor(mode);
@@ -978,9 +974,8 @@ function pracLoad(mode, i) {
   if (mode === 'A') {
     task.textContent = '초록 칩이 놓을 수 있는 칸은 모두 ' + pz.k + '개예요. 하나씩 눌러서 찾은 뒤 “확인하기”를 눌러요.';
   } else {
-    pb.showLegal(P.b, BLACK, true);
-    task.textContent = mode === 'E' ? '놓을 수 있는 칸마다 뒤집히는 칩의 개수가 적혀 있어요. 가장 많이 뒤집는 칸을 눌러 보세요.'
-      : '숫자만 보지 말고 모서리 칸(★)과 위험한 칸(!)도 함께 생각해서 가장 좋은 칸을 골라요.';
+    pb.showLegal(P.b, BLACK, false);
+    task.textContent = '노란 점선 칸 중에서 칩을 가장 많이 뒤집을 수 있는 칸을 한 곳 눌러요. 눌러 본 뒤 “확인하기”를 눌러요.';
   }
   setMsg($('#prac-msg'), '칸을 눌러 시작해요.');
   $('#prac-check').hidden = false; $('#prac-check').disabled = false;
@@ -1012,22 +1007,50 @@ function pracSolved(text) {
   setMsg($('#prac-msg'), text, 'ok');
   $('#prac-check').hidden = true; $('#prac-next').hidden = false;
   const last = P.i === PM[P.mode].list.length - 1;
-  $('#prac-next').textContent = last ? (P.mode === 'H' ? '게임하러 가기' : '다음 연습으로') : '다음 문제';
+  $('#prac-next').textContent = last ? (P.mode === 'E' ? '게임하러 가기' : '다음 연습으로') : '다음 문제';
   pb.clickable(false);
   $('#prac-next').focus();
 }
-function pracCheck() {
+async function pracAnimate(moves, keepLast, token) {
+  pb.clear(); pb.clickable(false);
+  const msg = $('#prac-msg');
+  for (let k = 0; k < moves.length; k++) {
+    const m = moves[k];
+    const nb = play(P.b, m.r, m.c, BLACK);
+    pb.add(m.r, m.c, 'ok');
+    setMsg(msg, moves.length > 1 ? (k + 1) + '/' + moves.length + ' 이 칸에 놓으면 상대 칩 ' + m.flips.length + '개가 뒤집혀요!' : '', 'ok');
+    const wait = pb.setChips(nb, m.flips, [m.r, m.c]);
+    await sleep(wait + 450);
+    if (token !== P.token) return false;
+    if (keepLast && k === moves.length - 1) break;
+    pb.setChips(P.b, [], null, true);
+    pb.rm(m.r, m.c, 'ok');
+    await sleep(120);
+    if (token !== P.token) return false;
+  }
+  return true;
+}
+async function pracCheck() {
   const msg = $('#prac-msg');
   if (P.solved) return;
   if (!P.sel.size) { setMsg(msg, '먼저 칸을 눌러서 골라 봐요.', 'warn'); return; }
   const legal = legalMoves(P.b, BLACK);
   P.tries++;
+  const token = P.token;
   if (P.mode === 'A') {
     const want = new Set(legal.map((m) => m.r + ',' + m.c));
     const wrong = [...P.sel].filter((s) => !want.has(s)), miss = [...want].filter((s) => !P.sel.has(s));
     for (const s of wrong) { const [a, b] = s.split(',').map(Number); pb.rm(a, b, 'sel'); pb.add(a, b, 'bad'); }
     if (!wrong.length && !miss.length) {
+      P.solved = true; $('#prac-check').hidden = true;
       for (const s of want) { const [a, b] = s.split(',').map(Number); pb.rm(a, b, 'sel'); pb.add(a, b, 'ok'); }
+      setMsg(msg, '정답! 놓을 수 있는 칸 ' + want.size + '개를 모두 찾았어요. 한 칸씩 놓으면 어떻게 뒤집히는지 볼까요?', 'ok');
+      await sleep(900);
+      if (token !== P.token) return;
+      const finished = await pracAnimate(legal, false, token);
+      if (!finished) return;
+      pb.clear();
+      for (const m of legal) pb.add(m.r, m.c, 'ok');
       pracSolved('정답! 놓을 수 있는 칸 ' + want.size + '개를 모두 찾았어요. 상대 칩을 가둘 수 있는 칸이었어요.');
     } else {
       const parts = [];
@@ -1038,33 +1061,28 @@ function pracCheck() {
     }
     return;
   }
-  const pz = PM[P.mode].list[P.i];
   const [r, c] = [...P.sel][0].split(',').map(Number);
   const f = flipsAt(P.b, r, c, BLACK).length;
-  const best = P.mode === 'E'
-    ? legal.reduce((a, m) => (m.flips.length > a.flips.length ? m : a), legal[0])
-    : { r: pz.best[0], c: pz.best[1] };
-  if (r === best.r && c === best.c) {
-    pb.rm(r, c, 'sel'); pb.add(r, c, 'ok');
-    if (P.mode === 'E') pracSolved('정답! ' + f + '개를 뒤집는 이 칸이 가장 많이 뒤집어요.');
-    else if (pz.type === 'corner') pracSolved('훌륭해요! 모서리 칸은 한번 차지하면 절대 뒤집히지 않아서, 뒤집는 개수가 적어도 가장 좋은 자리예요.');
-    else pracSolved('훌륭해요! 모서리 옆(! 칸)을 피하면서 가장 많이 뒤집는 칸이에요. 상대에게 모서리를 내주지 않아요.');
+  const best = legal.reduce((a, m) => (m.flips.length > a.flips.length ? m : a), legal[0]);
+  if (f === best.flips.length) {
+    P.solved = true; $('#prac-check').hidden = true;
+    const mv = legal.find((m) => m.r === r && m.c === c);
+    pb.rm(r, c, 'sel');
+    pb.clear(); pb.clickable(false);
+    setMsg(msg, '', 'ok');
+    const finished = await pracAnimate([mv], true, token);
+    if (!finished) return;
+    pracSolved('정답! 이 칸에 놓으면 상대 칩 ' + f + '개가 뒤집혀요. 가장 많이 뒤집는 칸이에요.');
     return;
   }
   pb.rm(r, c, 'sel'); pb.add(r, c, 'bad');
-  let hint;
-  if (P.mode === 'E') hint = '이 칸은 ' + f + '개를 뒤집어요. 숫자를 하나씩 비교해서 더 큰 숫자를 찾아봐요.';
-  else if (isDanger(P.b, r, c)) hint = '! 칸은 모서리 바로 옆이라 위험해요. 상대가 빈 모서리를 차지할 수 있어요.';
-  else if (pz.type === 'corner') hint = '★ 모서리 칸에 놓을 수 있어요! 모서리는 절대 뒤집히지 않아서 가장 좋아요.';
-  else hint = '! 칸을 빼고, 안전한 칸 중에서 숫자가 가장 큰 칸을 찾아봐요.';
-  setMsg(msg, hint, 'bad');
+  setMsg(msg, '이 칸보다 더 많이 뒤집는 칸이 있어요. 칸마다 가두어지는 상대 칩이 몇 개인지 가로, 세로, 대각선으로 세어 봐요.', 'bad');
   if (P.tries >= 3) pb.add(best.r, best.c, 'miss');
 }
 function pracNext() {
   const list = PM[P.mode].list;
   if (P.i < list.length - 1) pracLoad(P.mode, P.i + 1);
   else if (P.mode === 'A') pracLoad('E', 0);
-  else if (P.mode === 'E') pracLoad('H', 0);
   else goTab('play');
 }
 pb = createBoard($('#board-practice'), pracClick);
